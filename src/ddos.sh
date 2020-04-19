@@ -195,7 +195,7 @@ ban_ip_list_force()
     echo "Force blocked ips:" >> "$MAIL_TMP_FILE"
     echo >> "$MAIL_TMP_FILE"
 
-    while read CURR_LINE_IP; done
+    while read CURR_LINE_IP; do
         current_time=$(date +"%s")
         echo "$((current_time+BAN_PERIOD)) ${CURR_LINE_IP}" >> \
             "${BANS_IP_LIST}"
