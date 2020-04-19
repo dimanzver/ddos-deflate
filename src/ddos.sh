@@ -50,6 +50,15 @@ if ! command -v ss>/dev/null; then
     SS_MISSING=true
 fi
 
+#constants for creating tmp files
+TMP_PREFIX='/tmp/ddos'
+TMP_FILE="mktemp $TMP_PREFIX.XXXXXXXX"
+
+remove_tmp_files()
+{
+    rm -f "$TMP_PREFIX".*
+}
+
 load_conf()
 {
     CONF="${CONF_PATH}ddos.conf"
@@ -148,6 +157,10 @@ ignore_list()
 # param1 The ip address to block
 ban_ip()
 {
+    # execute tcpkill for 60 seconds
+    timeout -k 60 -s 9 60 \
+        tcpkill -9 host "$1" > /dev/null 2>&1 &
+
     if ! echo "$1" | grep ":">/dev/null; then
         if [ "$FIREWALL" = "apf" ]; then
             $APF -d "$1"
@@ -169,6 +182,20 @@ ban_ip()
             $IPT6 -I INPUT -s "$1" -j DROP
         fi
     fi
+}
+
+#ban ips without checking from file with ip on each line
+ban_ip_list_force()
+{
+    while read CURR_LINE_IP; done
+        current_time=$(date +"%s")
+        echo "$((current_time+BAN_PERIOD)) ${CURR_LINE_IP}" >> \
+            "${BANS_IP_LIST}"
+
+        ban_ip "$CURR_LINE_IP"
+
+        log_msg "banned ${CURR_LINE_IP}$ for ban period $BAN_PERIOD"
+    done < "$1"
 }
 
 # Unbans an ip.
@@ -410,11 +437,11 @@ ban_only_incoming()
 {
     whitelist=$(ignore_list "1")
 
-    ALL_LISTENING=$(mktemp "$TMP_PREFIX".XXXXXXXX)
-    ALL_LISTENING_FULL=$(mktemp "$TMP_PREFIX".XXXXXXXX)
-    ALL_CONNS=$(mktemp "$TMP_PREFIX".XXXXXXXX)
-    ALL_SERVER_IP=$(mktemp "$TMP_PREFIX".XXXXXXXX)
-    ALL_SERVER_IP6=$(mktemp "$TMP_PREFIX".XXXXXXXX)
+    ALL_LISTENING=$($TMP_FILE)
+    ALL_LISTENING_FULL=$($TMP_FILE)
+    ALL_CONNS=$($TMP_FILE)
+    ALL_SERVER_IP=$($TMP_FILE)
+    ALL_SERVER_IP6=$($TMP_FILE)
 
     # Find all connections
     get_connections | \
@@ -487,8 +514,8 @@ ban_by_port()
     whitelist=$(ignore_list "1")
 
     ip_all_list=$(get_connections)
-    ip_port_list=$(mktemp "$TMP_PREFIX".XXXXXXXX)
-    ip_only_list=$(mktemp "$TMP_PREFIX".XXXXXXXX)
+    ip_port_list=$($TMP_FILE)
+    ip_only_list=$($TMP_FILE)
 
     # Save all connections with port
     echo "$ip_all_list" | \
@@ -643,8 +670,6 @@ check_connections_cloudflare()
 {
     su_required
 
-    TMP_PREFIX='/tmp/ddos'
-    TMP_FILE="mktemp $TMP_PREFIX.XXXXXXXX"
     BAD_IP_LIST=$($TMP_FILE)
 
     ban_cloudflare "$BAD_IP_LIST"
@@ -712,7 +737,7 @@ check_connections_cloudflare()
         fi
     fi
 
-    rm -f "$TMP_PREFIX".*
+    remove_tmp_files
 }
 
 # Check active connections and ban if neccessary.
@@ -720,8 +745,6 @@ check_connections()
 {
     su_required
 
-    TMP_PREFIX='/tmp/ddos'
-    TMP_FILE="mktemp $TMP_PREFIX.XXXXXXXX"
     BAD_IP_LIST=$($TMP_FILE)
 
     if $ENABLE_PORTS; then
@@ -786,10 +809,6 @@ check_connections()
         echo "$((current_time+BAN_TOTAL)) ${CURR_LINE_IP} ${CURR_LINE_CONN} ${CURR_LINE_PORT}" >> \
             "${BANS_IP_LIST}"
 
-        # execute tcpkill for 60 seconds
-        timeout -k 60 -s 9 60 \
-            tcpkill -9 host "$CURR_LINE_IP" > /dev/null 2>&1 &
-
         ban_ip "$CURR_LINE_IP"
 
         log_msg "banned ${CURR_LINE_IP}${CURR_PORT} with $CURR_LINE_CONN connections for ban period $BAN_TOTAL"
@@ -810,7 +829,7 @@ check_connections()
         fi
     fi
 
-    rm -f "$TMP_PREFIX".*
+    remove_tmp_files
 }
 
 # Check if a connection is exceeding the BANDWIDTH_CONTROL_LIMIT
@@ -822,9 +841,6 @@ check_connections_bw()
     fi
 
     whitelist=$(ignore_list "1")
-
-    TMP_PREFIX='/tmp/ddos'
-    TMP_FILE="mktemp $TMP_PREFIX.XXXXXXXX"
 
     BANNED_IP_MAIL=$($TMP_FILE)
     BANNED_IP_LIST=$($TMP_FILE)
@@ -930,7 +946,7 @@ check_connections_bw()
         fi
     fi
 
-    rm -f "$TMP_PREFIX".*
+    remove_tmp_files
 }
 
 # Drops the transfer rate for a given ip.
