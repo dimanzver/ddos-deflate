@@ -1571,7 +1571,7 @@ while [ "$1" ]; do
             ;;
 
         '--ban-force')
-            ban_ip_list_force "$1"
+            ban_ip_list_force "$2"
             exit
             ;;
         '--ignore-list' | '-i' )
