@@ -54,6 +54,10 @@ fi
 TMP_PREFIX='/tmp/ddos'
 TMP_FILE="mktemp $TMP_PREFIX.XXXXXXXX"
 
+
+#file for store mail, which will send each interval
+MAIL_TMP_FILE="/tmp/mail-ddos"
+
 remove_tmp_files()
 {
     rm -f "$TMP_PREFIX".*
@@ -85,8 +89,9 @@ showhelp()
     echo 'N : number of tcp/udp connections (default '"$NO_OF_CONNECTIONS"')'
     echo
     echo 'OPTIONS:'
+    echo '--ban-force: Ban ips from file with ip on each line'
+    echo '--send-mail: Force send mail'
     echo '-h      | --help: Show this help screen'
-    echo '-c      | --cron: Create cron job to run this script regularly (default 1 mins)'
     echo '-i      | --ignore-list: List whitelisted ip addresses'
     echo '-b      | --bans-list: List currently banned ip addresses.'
     echo '-u      | --unban: Unbans a given ip address.'
@@ -187,6 +192,9 @@ ban_ip()
 #ban ips without checking from file with ip on each line
 ban_ip_list_force()
 {
+    echo "Force blocked ips:" >> "$MAIL_TMP_FILE"
+    echo >> "$MAIL_TMP_FILE"
+
     while read CURR_LINE_IP; done
         current_time=$(date +"%s")
         echo "$((current_time+BAN_PERIOD)) ${CURR_LINE_IP}" >> \
@@ -195,6 +203,7 @@ ban_ip_list_force()
         ban_ip "$CURR_LINE_IP"
 
         log_msg "banned ${CURR_LINE_IP}$ for ban period $BAN_PERIOD"
+        echo "$CURR_LINE_IP" >> "$MAIL_TMP_FILE"
     done < "$1"
 }
 
@@ -319,34 +328,6 @@ unban_ip_list_cloudflare()
             unban_ip_cloudflare "$ip" "$connections"
         fi
     done < $BANS_CLOUDFLARE_IP_LIST
-}
-
-add_to_cron()
-{
-    su_required
-
-    echo "Warning: this feature is deprecated and ddos-deflate should" \
-         "be run on daemon mode instead."
-
-    if [ "$FREQ" -gt 59 ]; then
-        FREQ=1
-    fi
-
-    # since this string contains * it is needed to double quote the
-    # variable when using it or the * will be evaluated by the shell
-    cron_task="*/$FREQ * * * * root $SBINDIR/ddos -k > /dev/null 2>&1"
-
-    if [ "$FIREWALL" = "ipfw" ]; then
-        cron_file=/etc/crontab
-        sed -i '' '/ddos/d' "$cron_file"
-        echo "$cron_task" >> "$cron_file"
-    else
-        rm -f "$CRON"
-        echo "$cron_task" > "$CRON"
-        chmod 644 "$CRON"
-    fi
-
-    log_msg "added cron job"
 }
 
 # Get table of ip connections from ss or netstat. Makes netstat output
@@ -692,11 +673,10 @@ check_connections_cloudflare()
         cat "$BAD_IP_LIST"
     fi
 
-    BANNED_IP_MAIL=$($TMP_FILE)
     BANNED_IP_LIST=$($TMP_FILE)
 
-    echo "Banned the following ip addresses on $(date)" > "$BANNED_IP_MAIL"
-    echo >> "$BANNED_IP_MAIL"
+    echo "Banned the following ip addresses on $(date)" >> "$MAIL_TMP_FILE"
+    echo >> "$MAIL_TMP_FILE"
 
     IP_BAN_NOW=0
 
@@ -710,7 +690,7 @@ check_connections_cloudflare()
 
         IP_BAN_NOW=1
 
-        echo "${CURR_LINE_IP} with $CURR_LINE_CONN connections" >> "$BANNED_IP_MAIL"
+        echo "${CURR_LINE_IP} with $CURR_LINE_CONN connections" >> "$MAIL_TMP_FILE"
         echo "${CURR_LINE_IP}" >> "$BANNED_IP_LIST"
 
         current_time=$(date +"%s")
@@ -723,12 +703,6 @@ check_connections_cloudflare()
     done < "$BAD_IP_LIST"
 
     if [ "$IP_BAN_NOW" -eq 1 ]; then
-        if [ -n "$EMAIL_TO" ]; then
-            dt=$(date)
-            hn=$(hostname)
-            cat "$BANNED_IP_MAIL" | mail -s "[$hn] Cloudflare IP addresses banned on $dt" $EMAIL_TO
-        fi
-
         if [ "$KILL" -eq 1 ]; then
             echo "==========================================="
             echo "Banned CloudFlare IP addresses:"
@@ -773,11 +747,10 @@ check_connections()
         cat "$BAD_IP_LIST"
     fi
 
-    BANNED_IP_MAIL=$($TMP_FILE)
     BANNED_IP_LIST=$($TMP_FILE)
 
-    echo "Banned the following ip addresses on $(date)" > "$BANNED_IP_MAIL"
-    echo >> "$BANNED_IP_MAIL"
+    echo "Banned the following ip addresses on $(date)" >> "$MAIL_TMP_FILE"
+    echo >> "$MAIL_TMP_FILE"
 
     IP_BAN_NOW=0
 
@@ -802,7 +775,7 @@ check_connections()
 
         IP_BAN_NOW=1
 
-        echo "${CURR_LINE_IP}${CURR_PORT} with $CURR_LINE_CONN connections" >> "$BANNED_IP_MAIL"
+        echo "${CURR_LINE_IP}${CURR_PORT} with $CURR_LINE_CONN connections" >> "$MAIL_TMP_FILE"
         echo "${CURR_LINE_IP}${CURR_PORT}" >> "$BANNED_IP_LIST"
 
         current_time=$(date +"%s")
@@ -815,12 +788,6 @@ check_connections()
     done < "$BAD_IP_LIST"
 
     if [ "$IP_BAN_NOW" -eq 1 ]; then
-        if [ -n "$EMAIL_TO" ]; then
-            dt=$(date)
-            hn=$(hostname)
-            cat "$BANNED_IP_MAIL" | mail -s "[$hn] IP addresses banned on $dt" $EMAIL_TO
-        fi
-
         if [ "$KILL" -eq 1 ]; then
             echo "==========================================="
             echo "Banned IP addresses:"
@@ -842,11 +809,10 @@ check_connections_bw()
 
     whitelist=$(ignore_list "1")
 
-    BANNED_IP_MAIL=$($TMP_FILE)
     BANNED_IP_LIST=$($TMP_FILE)
 
-    echo "Dropped transfer limit to following ip addresses on $(date)" > "$BANNED_IP_MAIL"
-    echo >> "$BANNED_IP_MAIL"
+    echo "Dropped transfer limit to following ip addresses on $(date)" >> "$MAIL_TMP_FILE"
+    echo >> "$MAIL_TMP_FILE"
 
     ip_drop_rate=0
 
@@ -925,7 +891,7 @@ check_connections_bw()
 
         drop_rate_ip "$ip" "$prio_tc"
 
-        echo "$ip using $bandwidth/s of bandwidth" >> "$BANNED_IP_MAIL"
+        echo "$ip using $bandwidth/s of bandwidth" >> "$MAIL_TMP_FILE"
 
         current_time=$(date +"%s")
         echo "$((current_time+BANDWIDTH_DROP_PERIOD)) $ip $bandwidth $prio_tc" >> \
@@ -937,16 +903,19 @@ check_connections_bw()
 
         log_msg "drop transfer rate for $ip wich used ${bandwidth}/s for ban period $BANDWIDTH_DROP_PERIOD"
     done < "$BAD_IP_LIST"
+    remove_tmp_files
+}
 
-    if [ "$ip_drop_rate" -eq 1 ]; then
-        if [ -n "$EMAIL_TO" ]; then
-            dt=$(date)
-            hn=$(hostname)
-            cat "$BANNED_IP_MAIL" | mail -s "[$hn] IP addresses transfer rate limit on $dt" $EMAIL_TO
-        fi
+send_mail()
+{
+    if [ ! -s "$MAIL_TMP_FILE" ]; then
+        return
     fi
 
-    remove_tmp_files
+    dt=$(date)
+    hn=$(hostname)
+    cat "$MAIL_TMP_FILE" | mail -s "[$hn] New blocks on your site" $EMAIL_TO
+    echo > "$MAIL_TMP_FILE"
 }
 
 # Drops the transfer rate for a given ip.
@@ -1281,7 +1250,7 @@ start_daemon()
 
     if [ ! -e "$BANS_CLOUDFLARE_IP_LIST" ]; then
         touch "${BANS_CLOUDFLARE_IP_LIST}"
-    fi
+    fi    
 
     nohup "$0" -l > /dev/null 2>&1 &
 
@@ -1346,6 +1315,7 @@ daemon_loop()
     # run unban and undrop lists after 10 seconds of initialization
     ban_check_timer=$(date +"%s")
     ban_check_timer=$((ban_check_timer+10))
+    last_send_mail=$(date +"%s")
 
     echo "Monitoring connections!"
     while true; do
@@ -1368,6 +1338,13 @@ daemon_loop()
 
             ban_check_timer=$(date +"%s")
             ban_check_timer=$((ban_check_timer+60))
+        fi
+
+        #send mail by interval
+        now=$(date +"%s")
+        if [ "$now" -gt $(($last_send_mail+$BANNED_IP_MAIL_INTERVAL)) ]; then
+            send_mail
+            last_send_mail=now
         fi
 
         sleep "$DAEMON_FREQ"
@@ -1570,6 +1547,7 @@ BANDWIDTH_CONTROL_LIMIT="1896kbit"
 BANDWIDTH_DROP_RATE="512kbit"
 BANDWIDTH_DROP_PERIOD=600
 BANDWIDTH_ONLY_INCOMING=true
+BANNED_IP_MAIL_INTERVAL=60
 
 # Load custom settings
 load_conf
@@ -1587,8 +1565,13 @@ while [ "$1" ]; do
             showhelp
             exit
             ;;
-        '--cron' | '-c' )
-            add_to_cron
+        '--send-mail')
+            send_mail
+            exit
+            ;;
+
+        '--ban-force')
+            ban_ip_list_force "$1"
             exit
             ;;
         '--ignore-list' | '-i' )
