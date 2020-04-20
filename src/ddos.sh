@@ -1412,11 +1412,22 @@ detect_ddos()
         ON_DDOS=false
     fi
 
+    if [ "$count" -gt "$STRONG_DDOS_DETECT_CONNECTIONS" ]; then
+        ON_STRONG_DDOS=true
+    else
+        ON_STRONG_DDOS=false
+    fi
+
     port_connections_max=$PORT_CONNECTIONS
     no_of_connections_max=$NO_OF_CONNECTIONS
     if $ON_DDOS; then
         port_connections_max=$ON_DDOS_PORT_CONNECTIONS
         no_of_connections_max=$ON_DDOS_NO_OF_CONNECTIONS
+    fi
+
+    if $ON_STRONG_DDOS; then
+        port_connections_max=$ON_STRONG_DDOS_PORT_CONNECTIONS
+        no_of_connections_max=$ON_STRONG_DDOS_NO_OF_CONNECTIONS
     fi
 }
 
@@ -1556,10 +1567,13 @@ FREQ=1
 DAEMON_FREQ=3
 NO_OF_CONNECTIONS=50
 DDOS_DETECT_CONNECTIONS=100
+STRONG_DDOS_DETECT_CONNECTIONS=150
 ON_DDOS_NO_OF_CONNECTIONS=20
+ON_STRONG_DDOS_NO_OF_CONNECTIONS=10
 ENABLE_PORTS=false
 PORT_CONNECTIONS="80:50:600 443:50:600"
 ON_DDOS_PORT_CONNECTIONS="80:20:600 443:20:600 20-21:5:600"
+ON_STRONG_DDOS_PORT_CONNECTIONS="80:10:600 443:10:600 20-21:5:600"
 FIREWALL="auto"
 EMAIL_TO="root"
 BAN_PERIOD=600
@@ -1574,6 +1588,7 @@ BANDWIDTH_DROP_PERIOD=600
 BANDWIDTH_ONLY_INCOMING=true
 BANNED_IP_MAIL_INTERVAL=60
 ON_DDOS=false
+ON_STRONG_DDOS=false
 
 # Load custom settings and init help variables
 load_conf
