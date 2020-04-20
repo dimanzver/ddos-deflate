@@ -908,7 +908,9 @@ check_connections_bw()
 
 send_mail()
 {
-    if [ ! -s "$MAIL_TMP_FILE" ]; then
+    #check mail content is empty
+    content=$(cat "$MAIL_TMP_FILE" | grep -v '^$')
+    if [ ! -n "$content" ]; then
         return
     fi
 
