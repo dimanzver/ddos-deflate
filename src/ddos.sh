@@ -407,7 +407,7 @@ ban_incoming_and_outgoing()
         # sort by number of connections
         sort -nr | \
         # Only store connections that exceed max allowed
-        awk "{ if (\$1 >= $NO_OF_CONNECTIONS) print; }" > \
+        awk "{ if (\$1 >= $no_of_connections_max) print; }" > \
         "$1"
 }
 
@@ -478,7 +478,7 @@ ban_only_incoming()
         # Numerical sort in reverse order
         sort -nr | \
         # Only store connections that exceed max allowed
-        awk "{ if (\$1 >= $NO_OF_CONNECTIONS) print; }" > \
+        awk "{ if (\$1 >= $no_of_connections_max) print; }" > \
         "$1"
 
     # remove temp files
@@ -540,7 +540,7 @@ ban_by_port()
     unset ip_all_list
 
     # Analyze all connections by port
-    for port in $(echo "$PORT_CONNECTIONS" | xargs); do
+    for port in $(echo "$port_connections_max" | xargs); do
         number=$(echo "$port" | cut -d":" -f1)
         max_conn=$(echo "$port" | cut -d":" -f2)
         ban_time=$(echo "$port" | cut -d":" -f3)
@@ -552,7 +552,7 @@ ban_by_port()
 
             awk -v pstart="$number_start" -v pend="$number_end" \
                 -v mconn="$max_conn" -v btime="$ban_time" \
-                -v mgconn="$NO_OF_CONNECTIONS" '
+                -v mgconn="$no_of_connections_max" '
                 FNR == 1 { ++fIndex }
                 fIndex == 1 {
                     # Match only ports in range
@@ -578,7 +578,7 @@ ban_by_port()
         # Handle specific ports eg: 80
         else
             awk -v portn="$number" -v mconn="$max_conn" \
-                -v btime="$ban_time" -v mgconn="$NO_OF_CONNECTIONS" '
+                -v btime="$ban_time" -v mgconn="$no_of_connections_max" '
                 FNR == 1 { ++fIndex }
                 fIndex == 1 {
                     # Match only exact port
@@ -628,7 +628,7 @@ ban_cloudflare()
             # sort by number of connections and save to file
             sort -nr | \
             # Only store connections that exceed max allowed
-            awk "{ if (\$1 >= $NO_OF_CONNECTIONS) print; }" > "$1"
+            awk "{ if (\$1 >= $no_of_connections_max) print; }" > "$1"
     else
         tcpdump -r "$CLOUDFLARE_PCAP" -n -A 2>/dev/null | \
             # filter tcpdump data to the CF needed header
@@ -1307,11 +1307,11 @@ daemon_loop()
     fi
 
     if $ENABLE_PORTS; then
-        echo "Ban by port rules selected. Port rules: [$PORT_CONNECTIONS]"
+        echo "Ban by port rules selected. Port rules: [$port_connections_max]"
     elif $ONLY_INCOMING; then
-        echo "Ban only incoming connections that exceed $NO_OF_CONNECTIONS"
+        echo "Ban only incoming connections that exceed $no_of_connections_max"
     else
-        echo "Ban in/out connections that combined exceed $NO_OF_CONNECTIONS"
+        echo "Ban in/out connections that combined exceed $no_of_connections_max"
     fi
 
     # run unban and undrop lists after 10 seconds of initialization
@@ -1321,6 +1321,7 @@ daemon_loop()
 
     echo "Monitoring connections!"
     while true; do
+        detect_ddos
         check_connections
         check_connections_bw
 
@@ -1397,6 +1398,25 @@ detect_firewall()
             log_msg "error: no valid firewall found"
             exit 1
         fi
+    fi
+}
+
+detect_ddos()
+{
+    #Detect DDOS attack
+    count=$(ss -ntu | wc -l)
+    if [ "$count" -gt "$DDOS_DETECT_CONNECTIONS" ]; then
+        ON_DDOS=true
+        echo "DDOS ATTACK POSSIBLE! DETECTED $count connections!" > "$MAIL_TMP_FILE"
+    else
+        ON_DDOS=false
+    fi
+
+    port_connections_max=$PORT_CONNECTIONS
+    no_of_connections_max=$NO_OF_CONNECTIONS
+    if $ON_DDOS; then
+        port_connections_max=$ON_DDOS_PORT_CONNECTIONS
+        no_of_connections_max=$ON_DDOS_NO_OF_CONNECTIONS
     fi
 }
 
@@ -1511,7 +1531,7 @@ view_ports()
     printf -- '-%.0s' $(seq 48); echo ""
     printf "% -15s % -15s % -15s\\n" "Port" "Max-Conn" "Ban-Time"
     printf -- '-%.0s' $(seq 48); echo ""
-    for port in $(echo "$PORT_CONNECTIONS" | xargs); do
+    for port in $(echo "$port_connections_max" | xargs); do
         number=$(echo "$port" | cut -d":" -f1)
         max_conn=$(echo "$port" | cut -d":" -f2)
         ban_time=$(echo "$port" | cut -d":" -f3)
@@ -1533,10 +1553,13 @@ IPT="/sbin/iptables"
 IPT6="/sbin/ip6tables"
 TC="/sbin/tc"
 FREQ=1
-DAEMON_FREQ=5
-NO_OF_CONNECTIONS=150
+DAEMON_FREQ=3
+NO_OF_CONNECTIONS=50
+DDOS_DETECT_CONNECTIONS=100
+ON_DDOS_NO_OF_CONNECTIONS=20
 ENABLE_PORTS=false
-PORT_CONNECTIONS="80:150:600 443:150:600"
+PORT_CONNECTIONS="80:50:600 443:50:600"
+ON_DDOS_PORT_CONNECTIONS="80:20:600 443:20:600 20-21:5:600"
 FIREWALL="auto"
 EMAIL_TO="root"
 BAN_PERIOD=600
@@ -1550,9 +1573,14 @@ BANDWIDTH_DROP_RATE="512kbit"
 BANDWIDTH_DROP_PERIOD=600
 BANDWIDTH_ONLY_INCOMING=true
 BANNED_IP_MAIL_INTERVAL=60
+ON_DDOS=false
 
-# Load custom settings
+# Load custom settings and init help variables
 load_conf
+port_connections_max=$PORT_CONNECTIONS
+no_of_connections_max=$NO_OF_CONNECTIONS
+
+detect_ddos
 
 # Overwrite old configuration values
 if echo "$CONN_STATES" | grep "|">/dev/null; then
