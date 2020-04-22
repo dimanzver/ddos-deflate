@@ -176,7 +176,7 @@ ban_ip()
             next_number=$((rule_number + 1))
             $IPF -q add "$next_number" deny all from "$1" to any
         elif [ "$FIREWALL" = "iptables" ]; then
-            $IPT -I INPUT -s "$1" -j DROP
+            $IPT -I PREROUTING -t mangle -s "$1" -j DROP
         fi
     else
         if [ "$FIREWALL" = "ipfw" ]; then
@@ -184,7 +184,7 @@ ban_ip()
             next_number=$((rule_number + 1))
             $IPF -q add "$next_number" deny all from "$1" to any
         else
-            $IPT6 -I INPUT -s "$1" -j DROP
+            $IPT6 -I PREROUTING -t mangle -s "$1" -j DROP
         fi
     fi
 }
@@ -225,14 +225,14 @@ unban_ip()
             rule_number=$($IPF list | awk "/$1/{print $1}")
             $IPF -q delete "$rule_number"
         elif [ "$FIREWALL" = "iptables" ]; then
-            $IPT -D INPUT -s "$1" -j DROP
+            $IPT -D PREROUTING -t mangle -s "$1" -j DROP
         fi
     else
         if [ "$FIREWALL" = "ipfw" ]; then
             rule_number=$($IPF list | awk "/$1/{print $1}")
             $IPF -q delete "$rule_number"
         else
-            $IPT6 -D INPUT -s "$1" -j DROP
+            $IPT6 -D PREROUTING -t mangle -s "$1" -j DROP
         fi
     fi
 
